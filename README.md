@@ -48,8 +48,41 @@ random topic name (`openssl rand -hex 16`) or self-host ntfy with access
 control.
 | `AUTOCLOCK_PUBLIC_URL` | `http://localhost:8000` | Base URL the phone uses; goes into notification action URLs |
 | `AUTOCLOCK_REMIND_MIN` | `0` | Re-send the "who for?" prompt after N minutes; 0 = off |
+| `AUTOCLOCK_VAPID_SUBJECT` | `mailto:autoclock@example.invalid` | VAPID contact claim for web push (usually `mailto:you@your.domain`) |
 
 ## Phone setup
+
+### Home-screen app with notifications (iPhone and Android) — recommended
+
+The picker page doubles as an installable web app (PWA) with first-party
+Web Push. No App Store app, no third-party push service, nothing to re-sign.
+The VAPID keypair is generated on first start and kept next to the database.
+
+Requirements:
+- **HTTPS.** iOS only delivers push to home-screen web apps served over a
+  trusted HTTPS origin, and browsers require a secure context for
+  `PushManager` everywhere. The easiest path is
+  [`tailscale serve`](https://tailscale.com/kb/1312/serve): run
+  `tailscale serve --bg 8000` on the host, use the resulting
+  `https://host.tailnet-name.ts.net` as `AUTOCLOCK_PUBLIC_URL`, and open
+  that URL on the phone. A reverse proxy that terminates HTTPS works too.
+- iOS 16.4+ for iPhone push; Android needs a current Chrome/Firefox.
+
+One-time setup:
+1. On the phone, open `https://your-server/?token=<AUTOCLOCK_TOKEN>` once so
+   the picker loads. Add it to the home screen (Share → **Add to Home
+   Screen** on iOS; the browser's *Install app* / *Add to Home screen* on
+   Android). The manifest's `start_url` keeps the installed app signed in —
+   a home-screen web app has its own cookie jar, separate from the browser.
+2. Launch the app from its icon and tap **Enable notifications**. Grant the
+   permission when prompted. That's it — the subscription lands in
+   `push_subscriptions` and every new pending session pushes a
+   "who for?" notification; a tap opens the picker with the ranked
+   customers first. (iOS ignores notification action buttons, so the likely
+   customer is named in the body instead.)
+
+The Shortcuts and ntfy flows below still work — keep them as alternatives or
+skip them if the home-screen app covers you.
 
 ### iOS Shortcuts
 
@@ -102,9 +135,12 @@ also accept `?token=` once and set an HttpOnly cookie).
 - `GET`/`POST /customers`, `PATCH /customers/{id}` — name, rate, archive
 - `GET /summary?from=&to=&group=day|week|customer[&format=csv]`
 - `GET /` — mobile picker: current session, unassigned warning, one big
-  button per customer, Stop
+  button per customer, Stop, Enable notifications
 - `GET /week` — weekly totals per day and per customer, CSV download
 - `GET /healthz` — no auth
+- `GET /manifest.webmanifest`, `/sw.js`, `/icon.svg` — PWA install bits
+- `GET /push/vapid-key`, `POST /push/subscribe`, `POST /push/unsubscribe` —
+  web push subscription management
 
 Unassigned time shows up as its own `unassigned` bucket and still counts
 toward totals.
