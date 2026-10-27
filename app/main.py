@@ -204,6 +204,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.patch("/sessions/{session_id}", dependencies=[Auth])
     def patch_session(session_id: int, patch: SessionPatch) -> dict:
+        apply_stale()
         if patch.clear_end and patch.end is not None:
             raise HTTPException(status_code=422, detail="end and clear_end conflict")
         if patch.clear_customer and patch.customer_id is not None:
@@ -222,6 +223,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/sessions/{session_id}", dependencies=[Auth])
     def delete_session(session_id: int) -> dict:
+        apply_stale()
         if not db.delete_session(conn, session_id):
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True}
@@ -257,10 +259,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/customers", dependencies=[Auth])
     def get_customers() -> list[dict]:
+        apply_stale()
         return db.list_customers(conn)
 
     @app.post("/customers", dependencies=[Auth], status_code=201)
     def post_customer(body: CustomerIn) -> dict:
+        apply_stale()
         try:
             return db.create_customer(conn, body.name, body.rate)
         except Exception as exc:
@@ -268,6 +272,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.patch("/customers/{customer_id}", dependencies=[Auth])
     def patch_customer(customer_id: int, patch: CustomerPatch) -> dict:
+        apply_stale()
         row = db.update_customer(
             conn,
             customer_id,
