@@ -26,7 +26,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from .config import Settings, load_settings
-from . import db, sessions as rules
+from . import db, push, sessions as rules
 from .notify import action_sig, send_work_prompt
 
 log = logging.getLogger("autoclock")
@@ -61,6 +61,15 @@ class TagBody(BaseModel):
     customer_id: int | None = None
 
 
+class SubscriptionIn(BaseModel):
+    endpoint: str
+    keys: dict = {}
+
+
+class UnsubscribeIn(BaseModel):
+    endpoint: str
+
+
 def _fmt_elapsed(seconds: float) -> str:
     m = int(seconds // 60)
     return f"{m // 60}h {m % 60}m" if m >= 60 else f"{m}m"
@@ -69,11 +78,14 @@ def _fmt_elapsed(seconds: float) -> str:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
     conn = db.connect(settings.db)
+    vapid = push.load_or_create_vapid(settings.db)
     tz = ZoneInfo(settings.tz)
     templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
     app = FastAPI(title="autoclock")
     app.state.settings = settings
     app.state.db = conn
+    app.state.vapid = vapid
+    app.state.loop: asyncio.AbstractEventLoop | None = None
     remind_tasks: set[asyncio.Task] = set()
 
     # ---- auth ---------------------------------------------------------------
@@ -114,6 +126,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def token_cookie_middleware(request: Request, call_next):
+        if app.state.loop is None:
+            app.state.loop = asyncio.get_running_loop()
         async with db_lock:
             resp = await call_next(request)
         if token_ok(request.query_params.get("token")):
@@ -147,6 +161,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dt = datetime.fromisoformat(v)
         return (dt if dt.tzinfo else dt.replace(tzinfo=tz)).astimezone(timezone.utc)
 
+    bg_tasks: set[asyncio.Task] = set()
+
+    def _spawn(coro) -> None:
+        task = asyncio.create_task(coro)
+        bg_tasks.add(task)
+        task.add_done_callback(bg_tasks.discard)
+
+    def schedule_push(customers: list[dict]) -> None:
+        """Send web push off the request path. The coroutine is scheduled on
+        the app's loop from this sync (threadpool) handler; it snapshots the
+        subscriptions under db_lock, then does the network calls in threads
+        without the lock. The event 2xx never waits on a push service."""
+        if not push.list_subscriptions(conn):
+            return
+        asyncio.run_coroutine_threadsafe(
+            push.send_all(settings, conn, vapid, customers, db_lock),
+            app.state.loop,
+        )
+
     def schedule_reminder(session_id: int) -> None:
         if settings.remind_min <= 0:
             return
@@ -159,6 +192,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 customers = ranked_customers() if pending else []
             if pending:
                 await asyncio.to_thread(send_work_prompt, settings, session_id, customers)
+                await push.send_all(settings, conn, vapid, customers, db_lock)
 
         task = asyncio.create_task(_remind())
         remind_tasks.add(task)
@@ -213,7 +247,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             result = db.apply_ops(conn, ops)
             if result["opened"] and result["opened"]["customer_id"] is None:
                 sid = result["opened"]["id"]
-                send_work_prompt(settings, sid, ranked_customers())
+                customers = ranked_customers()
+                send_work_prompt(settings, sid, customers)
+                schedule_push(customers)
                 schedule_reminder(sid)
             return {"ok": True, "reopened": result["reopened"],
                     "session": result["opened"] or (db.get_session_row(conn, latest.id) if result["reopened"] else None)}
@@ -355,6 +391,74 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 headers={"Content-Disposition": f"attachment; filename=autoclock-{group}.csv"},
             )
         return {"from": start.isoformat(), "to": end.isoformat(), "group": group, "rows": rows}
+
+    # ---- web push -----------------------------------------------------------
+
+    @app.get("/push/vapid-key", dependencies=[Auth])
+    def vapid_key() -> dict:
+        """Application-server key for PushManager.subscribe. Public by design
+        but kept behind auth since only the picker page needs it."""
+        return {"key": push.public_key_b64(vapid)}
+
+    @app.post("/push/subscribe", dependencies=[Auth])
+    def push_subscribe(body: SubscriptionIn) -> dict:
+        if not body.endpoint or "p256dh" not in body.keys or "auth" not in body.keys:
+            raise HTTPException(status_code=422, detail="endpoint and keys required")
+        push.add_subscription(conn, body.endpoint, body.keys)
+        return {"ok": True}
+
+    @app.post("/push/unsubscribe", dependencies=[Auth])
+    def push_unsubscribe(body: UnsubscribeIn) -> dict:
+        push.remove_subscription(conn, body.endpoint)
+        return {"ok": True}
+
+    @app.get("/manifest.webmanifest")
+    def manifest(request: Request) -> dict:
+        """start_url carries the token for a visitor that reached the page
+        authed, so the installed home-screen app (own cookie jar on iOS)
+        opens already signed in."""
+        start_url = "/"
+        if is_authed(request):
+            start_url = f"/?token={settings.token}"
+        return {
+            "name": "autoclock",
+            "short_name": "autoclock",
+            "start_url": start_url,
+            "scope": "/",
+            "display": "standalone",
+            "background_color": "#111827",
+            "theme_color": "#2563eb",
+            "icons": [
+                {
+                    "src": "/icon.svg",
+                    "sizes": "any",
+                    "type": "image/svg+xml",
+                    "purpose": "any",
+                }
+            ],
+        }
+
+    @app.get("/icon.svg")
+    def icon() -> Response:
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+            '<rect width="100" height="100" rx="20" fill="#2563eb"/>'
+            '<circle cx="50" cy="50" r="30" fill="none" stroke="#fff" stroke-width="8"/>'
+            '<path d="M50 35v15l11 8" fill="none" stroke="#fff" stroke-width="8"'
+            ' stroke-linecap="round"/></svg>'
+        )
+        return Response(content=svg, media_type="image/svg+xml")
+
+    @app.get("/sw.js")
+    def service_worker() -> Response:
+        """Served from the app root so its scope covers '/'. Content type
+        must be JavaScript for the browser to register it."""
+        path = Path(__file__).parent / "static" / "sw.js"
+        return Response(
+            content=path.read_bytes(),
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     # ---- pages --------------------------------------------------------------
 

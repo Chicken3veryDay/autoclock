@@ -9,6 +9,8 @@ dependencies = [
     "jinja2>=3.1",
     "httpx>=0.27",
     "python-multipart>=0.0.9",
+    "pywebpush>=2.5.0",
+    "http-ece>=1.2.1",
 ]
 
 [dependency-groups]
@@ -22,7 +24,7 @@ build-backend = "setuptools.build_meta"
 packages = ["app"]
 
 [tool.setuptools.package-data]
-app = ["templates/*.html"]
+app = ["templates/*.html", "static/*.js"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

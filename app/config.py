@@ -17,6 +17,7 @@ class Settings:
     ntfy_token: str | None = None
     public_url: str = "http://localhost:8000"
     remind_min: float = 0
+    vapid_subject: str = "mailto:autoclock@example.invalid"
 
 
 def load_settings() -> Settings:
@@ -34,4 +35,5 @@ def load_settings() -> Settings:
         ntfy_token=os.environ.get("NTFY_TOKEN") or None,
         public_url=os.environ.get("AUTOCLOCK_PUBLIC_URL", "http://localhost:8000").rstrip("/"),
         remind_min=float(os.environ.get("AUTOCLOCK_REMIND_MIN", "0")),
+        vapid_subject=os.environ.get("AUTOCLOCK_VAPID_SUBJECT", "mailto:autoclock@example.invalid"),
     )

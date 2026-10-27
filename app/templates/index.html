@@ -39,5 +39,69 @@
 </form>
 {% endif %}
 
+<button id="push-enable" class="big muted" type="button" hidden>
+  Enable notifications
+</button>
+<p id="push-state" hidden></p>
+
 <p><a href="/week">This week &rarr;</a></p>
+
+<script>
+(function () {
+  const btn = document.getElementById("push-enable");
+  const state = document.getElementById("push-state");
+  const supported = "serviceWorker" in navigator && "PushManager" in window;
+
+  function b64urlToBytes(b64) {
+    const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+    const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  }
+
+  async function refresh() {
+    if (!supported) return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      btn.hidden = true;
+      state.hidden = false;
+      state.textContent = "Notifications on.";
+    } else {
+      btn.hidden = false;
+      state.hidden = true;
+    }
+  }
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        state.hidden = false;
+        state.textContent = "Notification permission denied.";
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const { key } = await (await fetch("/push/vapid-key")).json();
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: b64urlToBytes(key),
+      });
+      await fetch("/push/subscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sub),
+      });
+      await refresh();
+    } catch (e) {
+      state.hidden = false;
+      state.textContent = "Could not enable notifications: " + e;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  refresh();
+})();
+</script>
 {% endblock %}

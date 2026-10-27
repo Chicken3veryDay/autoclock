@@ -24,6 +24,12 @@ CREATE TABLE IF NOT EXISTS sessions (
     source TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_start ON sessions(start);
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
 """
 
 
