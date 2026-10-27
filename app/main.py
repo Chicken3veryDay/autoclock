@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import hmac
 import logging
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -26,7 +27,7 @@ from pydantic import BaseModel
 
 from .config import Settings, load_settings
 from . import db, sessions as rules
-from .notify import send_work_prompt
+from .notify import action_sig, send_work_prompt
 
 log = logging.getLogger("autoclock")
 
@@ -77,23 +78,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # ---- auth ---------------------------------------------------------------
 
-    def require_auth(request: Request) -> None:
+    def token_ok(value: str | None) -> bool:
+        return bool(value) and hmac.compare_digest(value.encode(), settings.token.encode())
+
+    def is_authed(request: Request) -> bool:
         auth = request.headers.get("authorization", "")
-        if auth == f"Bearer {settings.token}":
+        return (
+            (auth.startswith("Bearer ") and token_ok(auth[7:]))
+            or token_ok(request.query_params.get("token"))
+            or token_ok(request.cookies.get("autoclock_token"))
+        )
+
+    def require_auth(request: Request) -> None:
+        if not is_authed(request):
+            raise HTTPException(status_code=401, detail="unauthorized")
+
+    def require_auth_or_sig(request: Request, session_id: int) -> None:
+        """Notification actions carry a per-session, per-customer signature
+        instead of the API token."""
+        if is_authed(request):
             return
-        qtoken = request.query_params.get("token")
-        if qtoken and qtoken == settings.token:
-            return
-        if request.cookies.get("autoclock_token") == settings.token:
+        sig = request.query_params.get("sig")
+        cid = request.query_params.get("customer_id")
+        if sig and cid and cid.isdigit() and hmac.compare_digest(
+            sig, action_sig(settings.token, session_id, int(cid))
+        ):
             return
         raise HTTPException(status_code=401, detail="unauthorized")
 
     Auth = Depends(require_auth)
 
+    # One shared sqlite connection: serialize requests so transactions from
+    # threadpool handlers never interleave. Single-user load makes this free.
+    db_lock = asyncio.Lock()
+
     @app.middleware("http")
     async def token_cookie_middleware(request: Request, call_next):
-        resp = await call_next(request)
-        if request.query_params.get("token") == settings.token:
+        async with db_lock:
+            resp = await call_next(request)
+        if token_ok(request.query_params.get("token")):
             resp.set_cookie(
                 "autoclock_token",
                 settings.token,
@@ -118,10 +141,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not value:
             return default
         v = value.strip()
-        if len(v) == 10:  # date only
-            return datetime.combine(datetime.fromisoformat(v).date(), time.min, tzinfo=timezone.utc)
+        if len(v) == 10:  # date only: local midnight
+            local = datetime.combine(datetime.fromisoformat(v).date(), time.min, tzinfo=tz)
+            return local.astimezone(timezone.utc)
         dt = datetime.fromisoformat(v)
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return (dt if dt.tzinfo else dt.replace(tzinfo=tz)).astimezone(timezone.utc)
 
     def schedule_reminder(session_id: int) -> None:
         if settings.remind_min <= 0:
@@ -129,9 +153,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         async def _remind() -> None:
             await asyncio.sleep(settings.remind_min * 60)
-            row = db.get_session_row(conn, session_id)
-            if row and row["end"] is None and row["customer_id"] is None:
-                send_work_prompt(settings, session_id, ranked_customers())
+            async with db_lock:
+                row = db.get_session_row(conn, session_id)
+                pending = row and row["end"] is None and row["customer_id"] is None
+                customers = ranked_customers() if pending else []
+            if pending:
+                await asyncio.to_thread(send_work_prompt, settings, session_id, customers)
 
         task = asyncio.create_task(_remind())
         remind_tasks.add(task)
@@ -200,7 +227,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def get_sessions(from_: str | None = Query(None, alias="from"),
                      to: str | None = Query(None)) -> list[dict]:
         apply_stale()
-        return db.list_sessions(conn, from_, to)
+        start = parse_dt(from_, None).isoformat() if from_ else None
+        end = parse_dt(to, None).isoformat() if to else None
+        return db.list_sessions(conn, start, end)
 
     @app.patch("/sessions/{session_id}", dependencies=[Auth])
     def patch_session(session_id: int, patch: SessionPatch) -> dict:
@@ -228,7 +257,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="session not found")
         return {"ok": True}
 
-    @app.post("/sessions/{session_id}/customer", dependencies=[Auth])
+    @app.post("/sessions/{session_id}/customer", dependencies=[Depends(require_auth_or_sig)])
     def post_session_customer(
         session_id: int,
         customer_id: int | None = Query(None),
@@ -301,7 +330,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for r in rows:
             for c in r["customers"]:
                 w.writerow([r["key"], c["customer"], f"{c['hours']:.4f}"])
-            w.writerow([r["key"], "", f"{r['hours']:.4f}"])
         return buf.getvalue()
 
     @app.get("/summary", dependencies=[Auth])

@@ -40,6 +40,12 @@ bare HTTP port.
 | `NTFY_URL` | `https://ntfy.sh` | ntfy server (self-hosted works too) |
 | `NTFY_TOPIC` | *(empty)* | ntfy topic; empty disables notifications |
 | `NTFY_TOKEN` | *(empty)* | Optional ntfy access token |
+
+Notification buttons never carry `AUTOCLOCK_TOKEN`. Each button URL has a
+signature that only lets it tag that one session with that one customer, so
+someone reading the topic can at worst mis-tag a session. Still pick a long,
+random topic name (`openssl rand -hex 16`) or self-host ntfy with access
+control.
 | `AUTOCLOCK_PUBLIC_URL` | `http://localhost:8000` | Base URL the phone uses; goes into notification action URLs |
 | `AUTOCLOCK_REMIND_MIN` | `0` | Re-send the "who for?" prompt after N minutes; 0 = off |
 

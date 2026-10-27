@@ -177,11 +177,52 @@ def test_ntfy_payload_shape(monkeypatch):
     for a in http_actions:
         assert a["url"].startswith(f"https://autoclock.example.com/sessions/{sid}/customer?customer_id=")
         assert a["method"] == "POST"
-        assert a["headers"]["Authorization"] == f"Bearer {TOKEN}"
+        assert "&sig=" in a["url"]
+        assert "headers" not in a
         assert a["clear"] is True
+    assert TOKEN not in repr(payload)
     view = [a for a in payload["actions"] if a["action"] == "view"][0]
     assert view["label"] == "Other..."
     assert view["url"] == "https://autoclock.example.com/"
+
+
+def test_signed_action_url_tags_without_token():
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    from app.notify import action_sig
+
+    app = create_app(make_settings())
+    with TestClient(app) as c:
+        acme = add_customer(c, "Acme")
+        globex = add_customer(c, "Globex")
+        enter(c)
+        sid = app.state.db.execute("SELECT id FROM sessions").fetchone()["id"]
+        sig = action_sig(TOKEN, sid, acme)
+        # a signature only covers its own customer and session
+        assert c.post(f"/sessions/{sid}/customer?customer_id={globex}&sig={sig}").status_code == 401
+        assert c.post(f"/sessions/{sid + 1}/customer?customer_id={acme}&sig={sig}").status_code == 401
+        assert c.post(f"/sessions/{sid}/customer?customer_id={acme}&sig=bad").status_code == 401
+        # and it grants nothing beyond tagging
+        assert c.get(f"/sessions?sig={sig}").status_code == 401
+        r = c.post(f"/sessions/{sid}/customer?customer_id={acme}&sig={sig}")
+        assert r.status_code == 200
+    row = app.state.db.execute("SELECT customer_id FROM sessions WHERE id=?", (sid,)).fetchone()
+    assert row["customer_id"] == acme
+
+
+def test_date_only_range_uses_local_midnight():
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+
+    app = create_app(make_settings(tz="America/Chicago"))
+    # 2026-10-27 03:00 UTC is 22:00 on Oct 26 in Chicago, so it's outside Oct 27
+    insert_session(app.state.db, iso(2026, 10, 27, 3), iso(2026, 10, 27, 4))
+    open_id = insert_session(app.state.db, iso(2026, 10, 27, 15))
+    with TestClient(app) as c:
+        r = c.get("/sessions?from=2026-10-27&to=2026-10-28", headers=AUTH)
+    assert r.status_code == 200
+    # the Oct 26 local session is excluded; the open session is included
+    assert [x["id"] for x in r.json()] == [open_id]
 
 
 def test_ntfy_failure_does_not_fail_event(monkeypatch):

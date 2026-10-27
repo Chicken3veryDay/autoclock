@@ -148,10 +148,10 @@ def list_sessions(
 ) -> list[dict]:
     sql, params = "SELECT * FROM sessions WHERE 1=1", []
     if start:
-        sql += " AND end >= ?"
+        sql += " AND (end IS NULL OR end > ?)"
         params.append(start)
     if end:
-        sql += " AND start <= ?"
+        sql += " AND start < ?"
         params.append(end)
     sql += " ORDER BY start"
     return [dict(r) for r in conn.execute(sql, params).fetchall()]

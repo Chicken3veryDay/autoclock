@@ -1,6 +1,8 @@
 """ntfy notification publishing. Never raises into request handling."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 
 import httpx
@@ -10,15 +12,24 @@ from .config import Settings
 log = logging.getLogger("autoclock.notify")
 
 
+def action_sig(token: str, session_id: int, customer_id: int) -> str:
+    """Signature that authorizes one tag action, so the API token never leaves
+    the server (ntfy relays and topic subscribers see the action URLs)."""
+    msg = f"tag:{session_id}:{customer_id}".encode()
+    return hmac.new(token.encode(), msg, hashlib.sha256).hexdigest()[:32]
+
+
 def _actions(settings: Settings, session_id: int, customers: list[dict]) -> list[dict]:
     base = settings.public_url
     actions = [
         {
             "action": "http",
             "label": c["name"],
-            "url": f"{base}/sessions/{session_id}/customer?customer_id={c['id']}",
+            "url": (
+                f"{base}/sessions/{session_id}/customer?customer_id={c['id']}"
+                f"&sig={action_sig(settings.token, session_id, c['id'])}"
+            ),
             "method": "POST",
-            "headers": {"Authorization": f"Bearer {settings.token}"},
             "clear": True,
         }
         for c in customers[:2]
