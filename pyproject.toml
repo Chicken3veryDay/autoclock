@@ -24,7 +24,7 @@ build-backend = "setuptools.build_meta"
 packages = ["app"]
 
 [tool.setuptools.package-data]
-app = ["templates/*.html", "static/*.js"]
+app = ["templates/*.html", "static/*.js", "static/*.png"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

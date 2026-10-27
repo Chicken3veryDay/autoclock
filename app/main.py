@@ -423,13 +423,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "theme_color": "#2563eb",
             "icons": [
                 {
+                    "src": "/icon-180.png",
+                    "sizes": "180x180",
+                    "type": "image/png",
+                    "purpose": "any",
+                },
+                {
                     "src": "/icon.svg",
                     "sizes": "any",
                     "type": "image/svg+xml",
                     "purpose": "any",
-                }
+                },
             ],
         }
+
+    @app.get("/icon-180.png")
+    def icon_png() -> Response:
+        path = Path(__file__).parent / "static" / "icon-180.png"
+        return Response(content=path.read_bytes(), media_type="image/png")
 
     @app.get("/icon.svg")
     def icon() -> Response:
