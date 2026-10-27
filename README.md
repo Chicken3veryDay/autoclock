@@ -53,19 +53,35 @@ control.
 
 ### iOS Shortcuts
 
-1. Subscribe to your `NTFY_TOPIC` in the ntfy app (optional but recommended).
-2. Shortcuts → Automation → **Arrive** → pick your work location →
-   **Run Immediately** → New Blank Automation → add **Get contents of URL**:
-   - URL: `https://your-server/event`
-   - Method: `POST`
-   - Headers: `Authorization` = `Bearer <AUTOCLOCK_TOKEN>`
-   - Request Body (JSON): `{"type":"enter","place":"work"}`
-3. Duplicate for **Leave** with body `{"type":"exit","place":"work"}`.
+One-time setup, App Store apps only, nothing to re-sign.
 
-When a notification arrives while you're at work, tap a customer button to
-tag the session, or **Other...** to open the picker page. Bookmark
-`https://your-server/?token=<AUTOCLOCK_TOKEN>` on your home screen: the
-token is stored in an HttpOnly cookie on first visit.
+1. Shortcuts → Automation → **Arrive** → pick your work location →
+   **Run Immediately** → New Blank Automation, then add:
+   1. **Get contents of URL** `https://your-server/event`, Method `POST`,
+      Header `Authorization` = `Bearer <AUTOCLOCK_TOKEN>`,
+      Request Body (JSON) `{"type":"enter","place":"work"}`.
+   2. **Get contents of URL** `https://your-server/customers?ranked=true`
+      with the same header. Customers come back most likely first.
+   3. **Get Dictionary Value** `name` from *Contents of URL* (gives the list
+      of names).
+   4. **Choose from List** with prompt "Who for?".
+   5. **URL Encode** *Chosen Item*, then **Get contents of URL**
+      `https://your-server/start?name=<URL Encoded Text>`, Method `POST`, same
+      header.
+2. Add a **Leave** automation with one **Get contents of URL**: `POST`
+   `https://your-server/event`, body `{"type":"exit","place":"work"}`.
+
+On arrival you get a "Who for?" prompt; tapping a name tags the session from
+the moment you arrived. Ignore it and the session stays *unassigned* until
+you fix it on the picker page.
+
+Optional extras:
+- **ntfy** (App Store) subscribed to `NTFY_TOPIC` for button prompts and
+  reminders (`AUTOCLOCK_REMIND_MIN`) if you skip steps 1.2-1.5.
+- **Picker page:** bookmark `https://your-server/?token=<AUTOCLOCK_TOKEN>`
+  to your home screen (Share → Add to Home Screen) to switch customers
+  mid-day or stop. The token is kept in an HttpOnly cookie after the first
+  visit.
 
 ### Android
 

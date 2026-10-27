@@ -278,3 +278,16 @@ def test_tag_form_assigns_open_session(client, conn):
     assert r.status_code == 303
     row = conn.execute("SELECT customer_id FROM sessions").fetchone()
     assert row["customer_id"] == cid
+
+
+def test_shortcut_flow_start_by_name_assigns_pending(client, conn):
+    add_customer(client, "Acme")
+    add_customer(client, "Globex")
+    enter(client)
+    names = [c["name"] for c in client.get("/customers?ranked=true", headers=AUTH).json()]
+    assert set(names) == {"Acme", "Globex"}
+    r = client.post("/start?name=Globex", headers=AUTH)
+    assert r.status_code == 200
+    rows = conn.execute("SELECT customer_id FROM sessions").fetchall()
+    assert len(rows) == 1  # the pending geofence session was tagged, not split
+    assert client.post("/start?name=Nobody", headers=AUTH).status_code == 404

@@ -269,9 +269,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return tag_session(session_id, cid)
 
     @app.post("/start", dependencies=[Auth])
-    def post_start(customer_id: int = Query(...)) -> dict:
+    def post_start(customer_id: int | None = Query(None), name: str | None = Query(None)) -> dict:
+        """Start or switch to a customer, by id or by name (the iOS Shortcut
+        picks a name from a menu)."""
         apply_stale()
-        if db.get_customer(conn, customer_id) is None:
+        if customer_id is None and name:
+            match = [c for c in db.list_customers(conn) if c["name"] == name]
+            customer_id = match[0]["id"] if match else None
+        if customer_id is None or db.get_customer(conn, customer_id) is None:
             raise HTTPException(status_code=404, detail="customer not found")
         open_s = db.get_open_session(conn)
         result = db.apply_ops(conn, rules.plan_manual_start(now(), open_s, customer_id))
@@ -287,9 +292,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"ok": True, "closed": bool(ops)}
 
     @app.get("/customers", dependencies=[Auth])
-    def get_customers() -> list[dict]:
+    def get_customers(ranked: bool = False) -> list[dict]:
         apply_stale()
-        return db.list_customers(conn)
+        return ranked_customers() if ranked else db.list_customers(conn)
 
     @app.post("/customers", dependencies=[Auth], status_code=201)
     def post_customer(body: CustomerIn) -> dict:
