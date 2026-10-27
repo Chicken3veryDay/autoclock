@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}autoclock - week{% endblock %}
+{% block body %}
+<h1>Week of {{ monday }}</h1>
+
+<table>
+  <tr><th>Day</th><th class="num">Hours</th></tr>
+  {% for d in days %}
+  <tr><td>{{ d.day }}</td><td class="num">{{ "%.2f"|format(d.hours) }}</td></tr>
+  {% endfor %}
+  <tr><th>Total</th><th class="num">{{ "%.2f"|format(total) }}</th></tr>
+</table>
+
+<h2>By customer</h2>
+<table>
+  <tr><th>Customer</th><th class="num">Hours</th></tr>
+  {% for c in customers %}
+  <tr><td>{{ c.customer }}</td><td class="num">{{ "%.2f"|format(c.hours) }}</td></tr>
+  {% endfor %}
+</table>
+
+<p>
+  <a href="{{ csv_url }}">Download CSV</a> &middot; <a href="/">&larr; Back</a>
+</p>
+{% endblock %}

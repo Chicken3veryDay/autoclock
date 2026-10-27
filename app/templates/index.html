@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>autoclock</h1>
+
+<div class="state">
+  {% if open %}
+    {% if open.customer_name %}
+      Working: <strong>{{ open.customer_name }}</strong>
+    {% else %}
+      Working: <strong>unassigned</strong>
+    {% endif %}
+    &mdash; {{ open.elapsed }}
+  {% else %}
+    Not clocked in.
+  {% endif %}
+</div>
+
+{% if pending %}
+<div class="warn">
+  <strong>Unassigned sessions</strong>
+  <ul>
+    {% for s in pending %}
+    <li>{{ s.start }} ({{ s.elapsed }})</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+{% for c in customers %}
+<form method="post" action="/tag">
+  <input type="hidden" name="customer_id" value="{{ c.id }}">
+  <button class="big" type="submit">{{ c.name }}</button>
+</form>
+{% endfor %}
+
+{% if open %}
+<form method="post" action="/stop-form">
+  <button class="big stop" type="submit">Stop</button>
+</form>
+{% endif %}
+
+<p><a href="/week">This week &rarr;</a></p>
+{% endblock %}

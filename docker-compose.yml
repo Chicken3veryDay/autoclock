@@ -1,0 +1,12 @@
+services:
+  autoclock:
+    build: .
+    env_file: .env
+    volumes:
+      - autoclock-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+
+volumes:
+  autoclock-data:
