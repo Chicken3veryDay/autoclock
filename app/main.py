@@ -161,13 +161,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dt = datetime.fromisoformat(v)
         return (dt if dt.tzinfo else dt.replace(tzinfo=tz)).astimezone(timezone.utc)
 
-    bg_tasks: set[asyncio.Task] = set()
-
-    def _spawn(coro) -> None:
-        task = asyncio.create_task(coro)
-        bg_tasks.add(task)
-        task.add_done_callback(bg_tasks.discard)
-
     def schedule_push(customers: list[dict]) -> None:
         """Send web push off the request path. The coroutine is scheduled on
         the app's loop from this sync (threadpool) handler; it snapshots the
