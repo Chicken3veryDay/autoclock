@@ -20,6 +20,13 @@ class Settings:
     vapid_subject: str = "mailto:autoclock@example.invalid"
 
 
+def _default_vapid_subject() -> str:
+    # Apple's push service rejects placeholder contacts; an https URL you
+    # control is accepted, so prefer the public URL when it is one.
+    url = os.environ.get("AUTOCLOCK_PUBLIC_URL", "").rstrip("/")
+    return url if url.startswith("https://") else "mailto:autoclock@example.invalid"
+
+
 def load_settings() -> Settings:
     token = os.environ.get("AUTOCLOCK_TOKEN", "").strip()
     if not token:
@@ -35,5 +42,5 @@ def load_settings() -> Settings:
         ntfy_token=os.environ.get("NTFY_TOKEN") or None,
         public_url=os.environ.get("AUTOCLOCK_PUBLIC_URL", "http://localhost:8000").rstrip("/"),
         remind_min=float(os.environ.get("AUTOCLOCK_REMIND_MIN", "0")),
-        vapid_subject=os.environ.get("AUTOCLOCK_VAPID_SUBJECT", "mailto:autoclock@example.invalid"),
+        vapid_subject=os.environ.get("AUTOCLOCK_VAPID_SUBJECT") or _default_vapid_subject(),
     )

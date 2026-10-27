@@ -95,6 +95,10 @@ def send_one(
             data=payload,
             vapid_private_key=vapid,
             vapid_claims={"sub": settings.vapid_subject},
+            # pywebpush defaults to TTL 0, which drops the push if the phone
+            # is briefly unreachable. Keep it for an hour, delivered promptly.
+            ttl=3600,
+            headers={"Urgency": "high"},
             timeout=10,
         )
         return "ok"

@@ -48,7 +48,7 @@ random topic name (`openssl rand -hex 16`) or self-host ntfy with access
 control.
 | `AUTOCLOCK_PUBLIC_URL` | `http://localhost:8000` | Base URL the phone uses; goes into notification action URLs |
 | `AUTOCLOCK_REMIND_MIN` | `0` | Re-send the "who for?" prompt after N minutes; 0 = off |
-| `AUTOCLOCK_VAPID_SUBJECT` | `mailto:autoclock@example.invalid` | VAPID contact claim for web push (usually `mailto:you@your.domain`) |
+| `AUTOCLOCK_VAPID_SUBJECT` | `AUTOCLOCK_PUBLIC_URL` if https, else a placeholder | VAPID contact claim for web push. Apple rejects placeholder addresses, so set an https URL or `mailto:` you own |
 
 ## Phone setup
 

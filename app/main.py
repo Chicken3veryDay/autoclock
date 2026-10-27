@@ -86,7 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = conn
     app.state.vapid = vapid
     app.state.loop: asyncio.AbstractEventLoop | None = None
-    remind_tasks: set[asyncio.Task] = set()
+    remind_tasks: set = set()
 
     # ---- auth ---------------------------------------------------------------
 
@@ -187,9 +187,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await asyncio.to_thread(send_work_prompt, settings, session_id, customers)
                 await push.send_all(settings, conn, vapid, customers, db_lock)
 
-        task = asyncio.create_task(_remind())
-        remind_tasks.add(task)
-        task.add_done_callback(remind_tasks.discard)
+        # Called from sync (threadpool) handlers, which have no running loop.
+        fut = asyncio.run_coroutine_threadsafe(_remind(), app.state.loop)
+        remind_tasks.add(fut)
+        fut.add_done_callback(remind_tasks.discard)
 
     def session_view(row: dict) -> dict:
         out = dict(row)

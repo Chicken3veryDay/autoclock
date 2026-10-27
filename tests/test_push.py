@@ -234,6 +234,9 @@ def test_real_encryption_round_trip(client, conn, monkeypatch):
     client.get("/healthz")
 
     assert captured["url"] == endpoint
+    hdrs = {k.lower(): str(v) for k, v in captured["headers"].items()}
+    assert int(hdrs["ttl"]) > 0
+    assert hdrs["urgency"] == "high"
     # aes128gcm: salt + rs + ciphertext; decrypt with the subscriber keys
     plaintext = http_ece.decrypt(
         captured["data"],
@@ -246,3 +249,21 @@ def test_real_encryption_round_trip(client, conn, monkeypatch):
     assert payload["title"] == "At work - who for?"
     assert payload["body"] == "Likely: Acme"
     assert payload["url"] == "/"
+
+
+def test_reminder_resends_prompt_for_pending_session(monkeypatch):
+    import time
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    import app.main as main_mod
+
+    sent = []
+    monkeypatch.setattr(main_mod, "send_work_prompt", lambda s, sid, c: sent.append(sid) or True)
+    app = create_app(make_settings(remind_min=0.001))
+    with TestClient(app) as c:
+        r = c.post("/event", json={"type": "enter"}, headers=AUTH)
+        assert r.status_code == 200
+        deadline = time.time() + 3
+        while len(sent) < 2 and time.time() < deadline:
+            time.sleep(0.02)
+    assert len(sent) == 2  # the arrival prompt, then one reminder
